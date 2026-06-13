@@ -67,7 +67,7 @@ def get_history():
 @app.route('/api/median_per_minute')
 def get_median():
     # Fetch data from the last hour for the graph
-    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+    one_hour_ago = datetime.now() - timedelta(hours=1)
     readings = SensorReading.query.filter(SensorReading.timestamp >= one_hour_ago).all()
     
     if not readings:
