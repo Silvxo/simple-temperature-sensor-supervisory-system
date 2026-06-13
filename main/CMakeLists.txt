@@ -1,10 +1,2 @@
-idf_component_register(
-    SRCS
-        "main.c"
-    INCLUDE_DIRS
-        "."
-    REQUIRES
-        sensor_manager
-        log
-        esp_common
-)
+idf_component_register(SRCS "sensor_task.c" "hdc1080.c" "main.c"
+                    INCLUDE_DIRS ".")
