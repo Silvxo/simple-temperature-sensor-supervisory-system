@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Supervisory System</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --bg: #f4f7f6;
+            --card-bg: #ffffff;
+            --text: #333;
+            --warm: #e67e22;
+            --cold: #3498db;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        header {
+            width: 100%;
+            max-width: 1000px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+        }
+
+        .tab-btn {
+            padding: 10px 20px;
+            border: none;
+            background: #ddd;
+            cursor: pointer;
+            border-radius: 5px;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+
+        .tab-btn.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            display: none;
+            animation: fadeIn 0.5s;
+        }
+
+        .container.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* View One Styles */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+        }
+
+        .latest-temp-card {
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .latest-temp-value {
+            font-size: 5rem;
+            font-weight: bold;
+            margin: 10px 0;
+            color: var(--accent);
+        }
+
+        .graph-card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        /* View Two Styles */
+        .table-card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            color: var(--primary);
+        }
+
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            background-color: #bbb;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+
+        .status-online { background-color: #2ecc71; }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>TempMonitor <span style="font-size: 0.8rem; font-weight: normal; color: #888;">v1.0</span></h1>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showView('view-one')">Real-time</button>
+            <button class="tab-btn" onclick="showView('view-two')">History</button>
+        </div>
+    </header>
+
+    <!-- View One: Dashboard -->
+    <div id="view-one" class="container active">
+        <div class="dashboard-grid">
+            <div class="latest-temp-card">
+                <h3>Latest Reading</h3>
+                <div id="temp-display" class="latest-temp-value">--°C</div>
+                <p id="last-updated" style="color: #888;">Waiting for data...</p>
+                <p id="sensor-id" style="font-weight: bold; color: var(--primary);"></p>
+            </div>
+            <div class="graph-card">
+                <h3>Median Temperature per Minute (Last Hour)</h3>
+                <canvas id="medianChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Two: History -->
+    <div id="view-two" class="container">
+        <div class="table-card">
+            <h3>Raw Data Logs</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date & Time</th>
+                        <th>Sensor ID</th>
+                        <th>Temperature</th>
+                    </tr>
+                </thead>
+                <tbody id="history-table-body">
+                    <!-- Rows will be added here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let medianChart;
+
+        function showView(viewId) {
+            document.querySelectorAll('.container').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(viewId).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        async function updateDashboard() {
+            try {
+                // Update Latest Temp
+                const latestRes = await fetch('/api/latest');
+                const latestData = await latestRes.json();
+                
+                if (!latestData.error) {
+                    const tempDisp = document.getElementById('temp-display');
+                    tempDisp.innerText = `${latestData.temperature.toFixed(1)}°C`;
+                    
+                    // Dynamic color based on temp
+                    if (latestData.temperature > 28) tempDisp.style.color = '#e74c3c';
+                    else if (latestData.temperature < 18) tempDisp.style.color = '#3498db';
+                    else tempDisp.style.color = '#2ecc71';
+
+                    document.getElementById('last-updated').innerText = `Last updated: ${new Date(latestData.timestamp).toLocaleTimeString()}`;
+                    document.getElementById('sensor-id').innerText = `Sensor: ${latestData.sensor_id}`;
+                }
+
+                // Update Median Chart
+                const medianRes = await fetch('/api/median_per_minute');
+                const medianData = await medianRes.json();
+                
+                if (medianData.length > 0) {
+                    const labels = medianData.map(d => new Date(d.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
+                    const values = medianData.map(d => d.temperature);
+
+                    if (medianChart) {
+                        medianChart.data.labels = labels;
+                        medianChart.data.datasets[0].data = values;
+                        medianChart.update();
+                    } else {
+                        initChart(labels, values);
+                    }
+                }
+
+                // Update History Table
+                const historyRes = await fetch('/api/history');
+                const historyData = await historyRes.json();
+                const tableBody = document.getElementById('history-table-body');
+                tableBody.innerHTML = '';
+                
+                historyData.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${new Date(row.timestamp).toLocaleString()}</td>
+                        <td>${row.sensor_id}</td>
+                        <td>${row.temperature.toFixed(1)}°C</td>
+                    `;
+                    tableBody.appendChild(tr);
+                });
+
+            } catch (err) {
+                console.error("Failed to fetch data", err);
+            }
+        }
+
+        function initChart(labels, data) {
+            const ctx = document.getElementById('medianChart').getContext('2d');
+            medianChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Median Temp (°C)',
+                        data: data,
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            suggestedMin: 15,
+                            suggestedMax: 35
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initial update and periodic refresh
+        updateDashboard();
+        setInterval(updateDashboard, 5000);
+    </script>
+</body>
+</html>
