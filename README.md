@@ -103,11 +103,3 @@ idf.py build
 # Grave e monitore
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
-
----
-
-## Próximas Etapas
-
-- [ ] `http_server`: dashboard web local rodando diretamente no ESP32
-- [ ] Leitura de pressão (ex: BMP280 via I2C no mesmo barramento)
-- [ ] Otimização de consumo de energia (Deep Sleep com retenção de dados)
