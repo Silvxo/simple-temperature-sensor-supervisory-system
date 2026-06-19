@@ -7,7 +7,7 @@ Projeto da disciplina de **Sistemas Embarcados** — Engenharia da Computação.
 ## Visão Geral
 
 Estação meteorológica embarcada com leitura de temperatura e umidade via sensor **HDC1080**,
-executando sobre **FreeRTOS** no ESP32 com **ESP-IDF** (sem abstração Arduino).
+executando sobre **FreeRTOS** no ESP32 com **ESP-IDF** (sem abstração Arduino) com armazenamento persistente em flash, sincronização temporal SNTP, envio via MQTT e Dashboard Flask para monitoramento histórico filtrado.
 
 ---
 
@@ -16,25 +16,28 @@ executando sobre **FreeRTOS** no ESP32 com **ESP-IDF** (sem abstração Arduino)
 ```
 weather_station/
 ├── CMakeLists.txt               # Raiz do projeto ESP-IDF
+├── partitions.csv               # Tabela de partições do ESP32 (customizada)
 ├── sdkconfig.defaults           # Configurações padrão do SDK
 │
 ├── main/
-│   ├── CMakeLists.txt
-│   ├── config.h                 # ★ Constantes globais (único local)
-│   └── main.c                   # Ponto de entrada — apenas orquestra inits
+│   ├── CMakeLists.txt           # Configuração do componente main
+│   ├── idf_component.yml        # Manifesto de dependências (esp-mqtt)
+│   ├── config.h                 # ★ Constantes globais (pinos, wifi, mqtt)
+│   ├── main.c                   # Ponto de entrada — orquestração de inits
+│   ├── hdc1080.c / .h           # Driver de hardware: comunicação I2C com o HDC1080
+│   ├── sensor_task.c / .h       # Leitura do sensor + escrita local em SPIFFS (thread-safe)
+│   ├── wifi_manager.c / .h      # Conexão Wi-Fi (modo STA) + sincronização de tempo SNTP
+│   ├── mqtt_manager.c / .h      # Driver/Wrapper de conectividade MQTT
+│   ├── mqtt_task.c / .h         # Leitura local do arquivo e transmissão via MQTT
+│   └── spiffs_manager.c / .h    # Montagem e inicialização do sistema de arquivos SPIFFS
 │
-└── components/
-    ├── hdc1080/                 # Camada: Driver de hardware
-    │   ├── CMakeLists.txt
-    │   ├── include/
-    │   │   └── hdc1080.h        # API pública do driver
-    │   └── hdc1080.c            # Comunicação I2C com o sensor
-    │
-    └── sensor_manager/          # Camada: Lógica de aplicação
-        ├── CMakeLists.txt
-        ├── include/
-        │   └── sensor_manager.h # API pública + tipos de dados
-        └── sensor_manager.c     # Tarefa FreeRTOS + mutex
+└── dashboard/                   # Sistema de supervisão (Flask)
+    ├── app.py                   # Servidor Flask com receptor MQTT
+    ├── models.py                # Modelo de banco de dados SQLAlchemy (SQLite)
+    ├── mock_sensor.py           # Simulador de sensor MQTT
+    ├── requirements.txt         # Dependências do Python
+    └── templates/
+        └── index.html           # Interface web com gráfico e dropdown de período
 ```
 
 ### Diagrama de camadas
@@ -43,11 +46,13 @@ weather_station/
 ┌─────────────────────────────────┐
 │           main.c                │  ← Orquestração apenas
 ├─────────────────────────────────┤
-│        sensor_manager           │  ← Lógica: tarefa, mutex, dados
+│    sensor_task / mqtt_task      │  ← Lógica: tarefas, mutex de arquivos
+├─────────────────────────────────┤
+│  wifi / mqtt / spiffs managers  │  ← Abstração de drivers de rede/arquivos
 ├─────────────────────────────────┤
 │           hdc1080               │  ← Driver: I2C, registradores
 ├─────────────────────────────────┤
-│     ESP-IDF (driver/i2c)        │  ← HAL do fabricante
+│      ESP-IDF (HAL, VFS, lwIP)   │  ← HAL do fabricante
 └─────────────────────────────────┘
 ```
 
@@ -57,8 +62,8 @@ weather_station/
 
 | Sinal     | ESP32 GPIO | HDC1080 |
 |-----------|-----------|---------|
-| SDA       | GPIO 21   | SDA     |
-| SCL       | GPIO 22   | SCL     |
+| SDA       | GPIO 18   | SDA     |
+| SCL       | GPIO 19   | SCL     |
 | Alimentação | 3.3V   | VCC     |
 | GND       | GND       | GND     |
 
@@ -72,26 +77,17 @@ weather_station/
 |----------------------------------|----------------------------------------------------|
 | ESP-IDF sem Arduino              | ✅ ESP-IDF nativo, `driver/i2c.h`                  |
 | RTOS                             | ✅ FreeRTOS (incluso no ESP-IDF)                   |
-| Tarefas paralelas                | ✅ `sensor_task` via `xTaskCreate()`               |
-| Proteção de memória crítica      | ✅ Mutex `xSemaphoreCreateMutex()` em `s_sensor_data` |
+| Tarefas paralelas                | ✅ `sensor_task` + `mqtt_send_task`                |
+| Proteção de memória crítica      | ✅ Mutex `sensor_data_mutex` em `s_sensor_data`    |
 | Interfaceamento com sensor       | ✅ HDC1080 via I2C (temperatura e umidade)         |
-| Separação por camadas (SRP)      | ✅ `hdc1080`, `sensor_manager`, `main`             |
 | Constantes em único local        | ✅ `main/config.h`                                 |
 | Logs de depuração                | ✅ `ESP_LOGI/LOGE/LOGD` em todos os módulos        |
-| Arquivos `.h` corretos           | ✅ Guards, `extern "C"`, apenas declarações        |
-| Main simples                     | ✅ Apenas `sensor_manager_init()` + log            |
-| Conectividade MQTT               | 🔲 Próxima etapa                                   |
-
----
-
-## Boas Práticas Aplicadas
-
-- **SRP**: cada módulo tem uma única responsabilidade.
-- **Encapsulamento**: `s_sensor_data` nunca é acessado diretamente; use `sensor_manager_get_data()`.
-- **Sem globais expostos**: estado interno dos módulos é `static`.
-- **Período determinístico**: `vTaskDelayUntil()` garante leitura a cada 2s exatos.
-- **Validação de hardware**: `hdc1080_init()` verifica o Manufacturer ID antes de prosseguir.
-- **Tratamento de erros**: todos os retornos de função são verificados.
+| Conectividade Wi-Fi              | ✅ `wifi_manager` com reconexão automática          |
+| Conectividade MQTT               | ✅ `mqtt_manager` + `mqtt_task` publicando dados    |
+| Armazenamento local persistente  | ✅ Salvamento em flash (SPIFFS) c/ timestamp Epoch |
+| Sincronização de relógio         | ✅ SNTP para obtenção do tempo real (Epoch)        |
+| Exclusão de arquivos segura      | ✅ Semáforo `file_mutex` para acesso ao SPIFFS     |
+| Dashboard Web c/ Filtro          | ✅ Flask c/ filtro de período (15m a 24h)          |
 
 ---
 
@@ -101,32 +97,17 @@ weather_station/
 # Configure o target
 idf.py set-target esp32
 
-# Compile
+# Compile (O IDF Component Manager baixará automaticamente a dependência MQTT)
 idf.py build
 
 # Grave e monitore
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-### Saída esperada no monitor serial
-
-```
-I (320)  MAIN: === Weather Station - Iniciando ===
-I (325)  MAIN: IDF versão: v5.x.x
-I (330)  HDC1080: Manufacturer ID lido: 0x5449 (esperado: 0x5449)
-I (345)  HDC1080: HDC1080 inicializado com sucesso. I2C porta=0, SDA=21, SCL=22, freq=400000Hz
-I (350)  SENSOR_MGR: Inicializando sensor_manager...
-I (355)  SENSOR_MGR: sensor_manager inicializado com sucesso. Tarefa 'sensor_task' criada.
-I (360)  SENSOR_MGR: Tarefa de leitura iniciada. Período: 2000ms, Prioridade: 5
-I (2360) SENSOR_MGR: Leitura OK | Temperatura: 24.35°C | Umidade: 58.12%
-I (4360) SENSOR_MGR: Leitura OK | Temperatura: 24.37°C | Umidade: 58.09%
-```
-
 ---
 
 ## Próximas Etapas
 
-- [ ] `wifi_manager`: conexão Wi-Fi com reconexão automática
-- [ ] `mqtt_manager`: publicação dos dados via MQTT (broker HiveMQ ou Mosquitto)
-- [ ] `http_server`: dashboard web local com atualização automática
+- [ ] `http_server`: dashboard web local rodando diretamente no ESP32
 - [ ] Leitura de pressão (ex: BMP280 via I2C no mesmo barramento)
+- [ ] Otimização de consumo de energia (Deep Sleep com retenção de dados)
