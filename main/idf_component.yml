@@ -1,0 +1,3 @@
+# ESP-IDF Component Manager Manifest
+dependencies:
+  espressif/mqtt: "^1.0.0"

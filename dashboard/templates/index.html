@@ -167,7 +167,20 @@
                 <p id="sensor-id" style="font-weight: bold; color: var(--primary);"></p>
             </div>
             <div class="graph-card">
-                <h3>Median Temperature per Minute (Last Hour)</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0;">Median Temperature Chart</h3>
+                    <div>
+                        <label for="period-select" style="font-weight: bold; color: var(--primary); margin-right: 8px;">Period:</label>
+                        <select id="period-select" onchange="changePeriod()" style="padding: 8px 12px; border-radius: 5px; border: 1px solid #ccc; background: white; font-family: inherit; font-size: 0.9rem; cursor: pointer; transition: border-color 0.2s;">
+                            <option value="15m">15 Minutes</option>
+                            <option value="30m">30 Minutes</option>
+                            <option value="1h" selected>1 Hour</option>
+                            <option value="6h">6 Hours</option>
+                            <option value="12h">12 Hours</option>
+                            <option value="24h">24 Hours</option>
+                        </select>
+                    </div>
+                </div>
                 <canvas id="medianChart"></canvas>
             </div>
         </div>
@@ -202,6 +215,10 @@
             event.target.classList.add('active');
         }
 
+        function changePeriod() {
+            updateDashboard();
+        }
+
         async function updateDashboard() {
             try {
                 // Update Latest Temp
@@ -222,8 +239,10 @@
                 }
 
                 // Update Median Chart
-                const medianRes = await fetch('/api/median_per_minute');
+                const period = document.getElementById('period-select').value;
+                const medianRes = await fetch(`/api/median_per_minute?period=${period}`);
                 const medianData = await medianRes.json();
+
                 
                 if (medianData.length > 0) {
                     const labels = medianData.map(d => new Date(d.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
