@@ -107,8 +107,9 @@ def get_median():
     # Reamostra pela frequência mapeada e calcula a mediana
     median_df = df['temperature'].resample(resample_freq).median().dropna()
     
-    result = [{"timestamp": ts.isoformat(), "temperature": temp} for ts, temp in median_df.items()]
+    result = [{"timestamp": ts.isoformat() + 'Z', "temperature": temp} for ts, temp in median_df.items()]
     return jsonify(result)
+
 
 if __name__ == '__main__':
     with app.app_context():

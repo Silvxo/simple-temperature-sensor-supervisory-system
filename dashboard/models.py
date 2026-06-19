@@ -14,5 +14,6 @@ class SensorReading(db.Model):
             "id": self.id,
             "sensor_id": self.sensor_id,
             "temperature": self.temperature,
-            "timestamp": self.timestamp.isoformat()
+            "timestamp": self.timestamp.isoformat() + 'Z'
         }
+
